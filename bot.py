@@ -243,7 +243,7 @@ async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     # ВСТАВЬ СВОЙ ТОКЕН СЮДА 👇
-    TOKEN = "ТВОЙ_ТОКЕН_ОТ_BOTFATHER"
+    TOKEN = "8869539861:AAEhpB4TBy7g0VvplY2ST0e-XuBIb1mtWKc"
     
     # Инициализация базы данных
     init_db()
