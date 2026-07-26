@@ -1,4 +1,6 @@
 import time
+import json
+import os
 import random
 import logging
 from telegram import Update, ReplyKeyboardMarkup
@@ -17,9 +19,32 @@ logging.basicConfig(
 )
 
 # =========================================================
-# 1. БАЗА ДАННЫХ И ПУЛ СТАВОК (В памяти)
+# 1. БАЗА ДАННЫХ (С сохранением в файл users.json)
 # =========================================================
-user_db = {}
+DB_FILE = "users.json"
+
+def load_db():
+    """Загружает базу данных из файла."""
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                # json хранит ключи как строки, переводим обратно в int (user_id)
+                data = json.load(f)
+                return {int(k): v for k, v in data.items()}
+        except Exception as e:
+            logging.error(f"Ошибка загрузки базы: {e}")
+    return {}
+
+def save_db():
+    """Сохраняет текущую базу данных в файл."""
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(user_db, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logging.error(f"Ошибка сохранения базы: {e}")
+
+# Инициализируем базу данных из файла при запуске
+user_db = load_db()
 active_bets = []          # Список текущих ставок
 cooldown_start_time = 0   # Время первой ставки
 ROULETTE_COOLDOWN = 7     # Кулдаун в секундах
@@ -32,12 +57,13 @@ def get_user_data(user_id: int):
             "bank": 0,
             "last_bonus": 0
         }
+        save_db()  # Сохраняем нового пользователя
     return user_db[user_id]
 
 def update_user_data(user_id: int, data: dict):
-    """Обновляет данные пользователя."""
+    """Обновляет данные пользователя и сразу сохраняет в файл."""
     user_db[user_id] = data
-
+    save_db()  # Автоматически сохраняем изменения на диск
 
 # =========================================================
 # 2. ОСНОВНЫЕ КОМАНДЫ ( /start, /deposit, /withdraw, /calc )
@@ -46,7 +72,7 @@ def update_user_data(user_id: int, data: dict):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Приветствие и выдача клавиатуры с кнопками."""
     keyboard = [
-        ["💰 Кошелек", "🎁 Ежечасовой подарок"],
+        ["💰 Кошелек", "🎁 Подарок"],
         ["🎰 Рулетка", "🏦 Банк"],
         ["🧮 Калькулятор"]
     ]
@@ -332,18 +358,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = f"💳 <b>Ваш кошелек:</b>\n• На руках: {user['balance']} Valor\n• В банке: {user['bank']} Valor"
         await update.message.reply_text(msg, parse_mode="HTML")
 
-    elif raw_text in ["🎁 Ежечасовой подарок", "🎁 Бонус (1000 Valor)"]:
+    elif raw_text in ["🎁 Подарок", "🎁 Бонус (1000 Valor)"]:
         now = time.time()
         cooldown = 1 * 3600  # 1 час
         if now - user.get("last_bonus", 0) >= cooldown:
             user["balance"] += 1000
             user["last_bonus"] = now
             update_user_data(user_id, user)
-            await update.message.reply_text("🎉 Вы получили ваш ежечасовой подарок: 1000 Valor!")
+            await update.message.reply_text("🎉 Вы получили ваш Подарок: 1000 Valor!")
         else:
             remaining = int(cooldown - (now - user["last_bonus"]))
             mins, secs = divmod(remaining, 60)
-            await update.message.reply_text(f"⏳ Ежечасовой подарок пока недоступен!\nПодождите еще {mins} мин. {secs} сек.")
+            await update.message.reply_text(f"⏳ Подарок пока недоступен!\nПодождите еще {mins} мин. {secs} сек.")
 
     elif raw_text.startswith("🎰 Рулетка"):
         await update.message.reply_text(
