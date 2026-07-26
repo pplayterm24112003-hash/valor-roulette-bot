@@ -208,13 +208,13 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if is_first_bet:
         await update.message.reply_text(
-            f"✅ <b>{user.first_name}</b> сделал(а) первую ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
-            f"⏳ Кулдаун <b>7 секунд</b> начался!\n📊 Всего ставок: <b>{len(active_bets)}</b>.",
+            f"✅ <b>{user.first_name}</b> ставит <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
+            f"\n📊 Всего ставок: <b>{len(active_bets)}</b>.",
             parse_mode="HTML"
         )
     else:
         await update.message.reply_text(
-            f"✅ <b>{user.first_name}</b> добавил(а) ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
+            f"✅ <b>{user.first_name}</b> ставит <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
             f"📊 Всего ставок: <b>{len(active_bets)}</b>.",
             parse_mode="HTML"
         )
@@ -271,9 +271,9 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if won:
             win_amount = bet * multiplier
             u_data["balance"] += win_amount
-            results_summary.append(f"🟢 <b>{name}</b>: +{win_amount - bet} Valor (Выигрыш!)")
+            results_summary.append(f"🟢 <b>{name}</b>: +{win_amount - bet} Valor")
         else:
-            results_summary.append(f"🔴 <b>{name}</b>: -{bet} Valor (Проигрыш)")
+            results_summary.append(f"🔴 <b>{name}</b>: -{bet} Valor")
 
         update_user_data(u_id, u_data)
 
@@ -283,8 +283,7 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     res_text = "\n".join(results_summary)
     await update.message.reply_text(
-        f"🎰 <b>Рулетка закрутилась!</b>\n\n"
-        f"🎯 Выпало: <b>{winning_number} ({winning_color.upper()})</b>\n\n"
+        f"🎯 Выпало: <b>{winning_number} {winning_color.upper()}</b>\n\n"
         f"<b>Результаты раунда:</b>\n{res_text}",
         parse_mode="HTML"
     )
@@ -355,7 +354,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- 5. ОБРАБОТКА КНОПОК МЕНЮ ---
 
     if raw_text in ["💰 Кошелек", "💰 Баланс"]:
-        msg = f"💳 <b>Ваш кошелек:</b>\n• На руках: {user['balance']} Valor\n• В банке: {user['bank']} Valor"
+        msg = f"💴 <b>Ваш кошелек:</b>\n• На руках: {user['balance']} Valor\n• В банке: {user['bank']} Valor"
         await update.message.reply_text(msg, parse_mode="HTML")
 
     elif raw_text in ["🎁 Подарок", "🎁 Бонус (1000 Valor)"]:
