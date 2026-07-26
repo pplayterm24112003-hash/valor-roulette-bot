@@ -183,7 +183,7 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if is_first_bet:
         await update.message.reply_text(
             f"✅ <b>{user.first_name}</b> сделал(а) первую ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
-            f"⏳ Кулдаун <b>7 секунд</b> начался! Другие игроки могут делать ставки. Запустить рулетку (написать <code>го</code>) можно будет только через 7 сек.",
+            f"⏳ Кулдаун <b>7 секунд</b> начался!\n📊 Всего ставок: <b>{len(active_bets)}</b>.",
             parse_mode="HTML"
         )
     else:
@@ -360,7 +360,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🏦 <b>Управление банком:</b>\n\n"
             "• <code>б 1000</code> — положить в банк\n"
-            "• <code>б -400</code> — снять из банка",
+            "• <code>б -1000</code> — снять из банка",
             parse_mode="HTML"
         )
 
