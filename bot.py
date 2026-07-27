@@ -33,34 +33,34 @@ logging.basicConfig(
 # =========================================================
 DONATE_PACKAGES = {
     "pack_5": {
-        "title": "2 500 Valor",
+        "title": "20 000 Valor",
         "description": "Пакет «Новичок»",
-        "stars": 5,
-        "valor": 2500,
+        "stars": 15,
+        "valor": 20000,
     },
     "pack_15": {
-        "title": "8 500 Valor",
-        "description": "Пакет «Игрок» (+13% бонусом)",
-        "stars": 15,
-        "valor": 8500,
+        "title": "35 000 Valor",
+        "description": "Пакет «Игрок»",
+        "stars": 25,
+        "valor": 35000,
     },
     "pack_35": {
-        "title": "22 000 Valor",
-        "description": "Пакет «Хайроллер» (+25% бонусом)",
-        "stars": 35,
-        "valor": 22000,
+        "title": "80 000 Valor",
+        "description": "Пакет «Хайроллер»",
+        "stars": 50,
+        "valor": 80000,
     },
     "pack_75": {
-        "title": "50 000 Valor",
-        "description": "Пакет «Магнат» (+33% бонусом)",
+        "title": "125 000 Valor",
+        "description": "Пакет «Магнат»",
         "stars": 75,
-        "valor": 50000,
+        "valor": 125000,
     },
     "pack_150": {
-        "title": "115 000 Valor",
+        "title": "180 000 Valor",
         "description": "Пакет «Кит» (Максимальная выгода 💥)",
         "stars": 150,
-        "valor": 115000,
+        "valor": 180000,
     },
 }
 
@@ -689,19 +689,19 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
       5,
       7,
       9,
-      12,
-      14,
-      16,
-      18,
+      11,
+      13,
+      15,
+      17,
       19,
       21,
       23,
       25,
       27,
-      30,
-      32,
-      34,
-      36,
+      29,
+      31,
+      33,
+      35,
   ]
 
   if winning_number == 0:
@@ -781,7 +781,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data, earned = apply_bank_interest(user.id, user_data)
     user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
     msg = (
-        f"💳 <b>Кошелек {user_mention}:</b>\n• На руках: {user_data['balance']}"
+        f"💴 <b>Кошелек {user_mention}:</b>\n• На руках: {user_data['balance']}"
         f" Valor\n• В банке: {user_data['bank']} Valor"
     )
     if earned > 0:
@@ -829,7 +829,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data, earned = apply_bank_interest(user.id, user_data)
     user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
     msg = (
-        f"💳 <b>Кошелек {user_mention}:</b>\n• На руках: {user_data['balance']}"
+        f"💴 <b>Кошелек {user_mention}:</b>\n• На руках: {user_data['balance']}"
         f" Valor\n• В банке: {user_data['bank']} Valor"
     )
     if earned > 0:
@@ -863,8 +863,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data, earned = apply_bank_interest(user.id, user_data)
     msg = (
         "🏦 <b>Управление банком:</b>\n\n"
-        "• <code>б 1000</code> — положить в банк\n"
-        "• <code>б -400</code> — снять из банка\n\n"
+        "• <code>б 500</code> — положить в банк\n"
+        "• <code>б -500</code> — снять из банка\n\n"
         "💡 <i>Банк приносит 1% каждые 12 часов от суммы на счету!</i>"
     )
     if earned > 0:
