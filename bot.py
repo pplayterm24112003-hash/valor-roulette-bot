@@ -1,8 +1,9 @@
 import time
-import sqlite3
-import logging
+import json
+import os
 import random
 import logging
+import sqlite3
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -19,13 +20,12 @@ logging.basicConfig(
 )
 
 # =========================================================
-# 1. БАЗА ДАННЫХ (С сохранением в файл users.json)
+# 1. БАЗА ДАННЫХ SQLITE (Сохранение данных навсегда)
 # =========================================================
-
-DB_NAME = "database.db"  # Если на Render с Persistent Disk, укажите путь: "/var/data/database.db"
+DB_NAME = "database.db"
 
 def init_db():
-    """Создает таблицу пользователей, если ее еще нет."""
+    """Создает таблицу пользователей в SQLite, если её еще нет."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -40,7 +40,7 @@ def init_db():
     conn.close()
 
 def get_user_data(user_id: int) -> dict:
-    """Получает данные пользователя или регистрирует нового с балансом 1000."""
+    """Получает данные пользователя из SQLite или регистрирует нового с балансом 1000."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -66,7 +66,7 @@ def get_user_data(user_id: int) -> dict:
     }
 
 def update_user_data(user_id: int, data: dict):
-    """Обновляет баланс и данные пользователя в базе данных."""
+    """Обновляет баланс и данные пользователя в SQLite."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -79,8 +79,15 @@ def update_user_data(user_id: int, data: dict):
     conn.commit()
     conn.close()
 
+
+# Глобальные переменные для рулетки
+active_bets = []          
+cooldown_start_time = 0   
+ROULETTE_COOLDOWN = 7     
+
+
 # =========================================================
-# 2. ОСНОВНЫЕ КОМАНДЫ ( /start, /deposit, /withdraw, /give, /calc )
+# 2. ОСНОВНЫЕ КОМАНДЫ
 # =========================================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,7 +127,6 @@ async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user["balance"] -= amount
     user["bank"] += amount
     update_user_data(user_id, user)
-
     await update.message.reply_text(
         f"🏦 <b>Депозит успешный!</b>\n"
         f"• Переведено в банк: {amount} Valor\n"
@@ -138,6 +144,7 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("❌ Укажите сумму! Пример: <code>/withdraw 500</code> или <code>б -500</code>", parse_mode="HTML")
         return
+
     amount = int(context.args[0])
     if amount <= 0:
         await update.message.reply_text("❌ Сумма должна быть больше 0!")
@@ -165,14 +172,12 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender = update.effective_user
     reply_msg = update.message.reply_to_message
 
-    # 1. Проверяем, сделан ли ответ на сообщение
     if not reply_msg:
-        await update.message.reply_text("❌ Чтобы передать Valor, ответьте на сообщение игрока комендой <code>о <сумма></code>!", parse_mode="HTML")
+        await update.message.reply_text("❌ Чтобы передать Valor, ответьте на сообщение игрока командой <code>о <сумма></code>!", parse_mode="HTML")
         return
 
     target_user = reply_msg.from_user
 
-    # 2. Нельзя передавать самому себе или ботам
     if target_user.id == sender.id:
         await update.message.reply_text("❌ Вы не можете передать Valor самому себе!")
         return
@@ -180,7 +185,6 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Нельзя передавать Valor ботам!")
         return
 
-    # 3. Проверяем сумму
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("❌ Укажите сумму для передачи! Пример: <code>о 200</code>", parse_mode="HTML")
         return
@@ -197,14 +201,12 @@ async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Недостаточно средств на руках! Ваш баланс: {sender_data['balance']} Valor")
         return
 
-    # 4. Производим транзакцию
     sender_data["balance"] -= amount
     target_data["balance"] += amount
 
     update_user_data(sender.id, sender_data)
     update_user_data(target_user.id, target_data)
 
-    # Красиво тегаем обоих игроков
     sender_mention = f'<a href="tg://user?id={sender.id}">{sender.first_name}</a>'
     target_mention = f'<a href="tg://user?id={target_user.id}">{target_user.first_name}</a>'
 
@@ -233,9 +235,8 @@ async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# 3. МНОГОПОЛЬЗОВАТЕЛЬСКАЯ РУЛЕТКА (Прием ставок + Ручной запуск)
+# 3. РУЛЕТКА
 # =========================================================
-
 async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сделать ставку в общий стол."""
     global active_bets, cooldown_start_time
@@ -248,6 +249,7 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     bet = int(context.args[0])
     choice = context.args[1].lower()
+
     if bet <= 0:
         await update.message.reply_text("❌ Ставка должна быть больше 0!")
         return
@@ -273,29 +275,24 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if is_first_bet:
         await update.message.reply_text(
-            f"✅ <b>{user.first_name}</b> ставит ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
-            f"📊 Всего ставок: <b>{len(active_bets)}</b>.",
+            f"✅ <b>{user.first_name}</b> сделал(а) первую ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
+            f"⏳ Кулдаун <b>7 секунд</b> начался! Запустить рулетку можно через <code>го</code>.",
             parse_mode="HTML"
         )
     else:
         await update.message.reply_text(
-            f"✅ <b>{user.first_name}</b> ставит <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
+            f"✅ <b>{user.first_name}</b> добавил(а) ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
             f"📊 Всего ставок: <b>{len(active_bets)}</b>.",
             parse_mode="HTML"
         )
 
 
 async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запуск рулетки по команде пользователя с проверкой КД."""
+    """Запуск рулетки."""
     global active_bets, cooldown_start_time
-    
-    # Константы и состояние рулетки
-    ROULETTE_COOLDOWN = 7  # В секундах
-    active_bets = []
-    cooldown_start_time = 0
 
     if not active_bets:
-        await update.message.reply_text("❌ Ставок еще нет! Сделайте ставку (например: <code>100 ч</code>)", parse_mode="HTML")
+        await update.message.reply_text("❌ Ставок еще нет! Сделайте ставку (например: <code>500 ч</code>)", parse_mode="HTML")
         return
 
     elapsed = time.time() - cooldown_start_time
@@ -350,6 +347,7 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     res_text = "\n".join(results_summary)
     await update.message.reply_text(
+        f"🎰 <b>Рулетка закрутилась!</b>\n\n"
         f"🎯 Выпало: <b>{winning_number} ({winning_color.upper()})</b>\n\n"
         f"<b>Результаты раунда:</b>\n{res_text}",
         parse_mode="HTML"
@@ -357,9 +355,8 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# 4. ОБРАБОТЧИК СООБЩЕНИЙ И ТРИГГЕРОВ (HANDLE_MESSAGE)
+# 4. ОБРАБОТЧИК СООБЩЕНИЙ И ТРИГГЕРОВ
 # =========================================================
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -369,25 +366,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text.strip()
     text = raw_text.lower()
 
-    # --- 1. ТРИГГЕР ДЛЯ ЗАПУСКА РУЛЕТКИ ---
+    # 1. Запуск рулетки
     if text in ["го", "крутить", "погнали", "пуск"]:
         await spin_command(update, context)
         return
-# --- 2. ТРИГГЕР ДЛЯ КОШЕЛЬКА (буква "к") С ТЕГОМ ПОЛЬЗОВАТЕЛЯ ---
+
+    # 2. Кошелек по букве "к"
     if text == "к":
         user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
         msg = (
-            f"💴 <b>Кошелек пользователя {user_mention}:</b>\n"
+            f"💳 <b>Кошелек пользователя {user_mention}:</b>\n"
             f"• На руках: {user_data['balance']} Valor\n"
             f"• В банке: {user_data['bank']} Valor"
         )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-    # --- 3. ТРИГГЕРЫ ДЛЯ БАНКА И ОБМЕНА ВАЛОРАМИ ---
     parts = text.split()
 
-    # Быстрый триггер обмена: "о 200" (отдать 200 валоров в ответ на сообщение)
+    # 3. Передача валоров: "о 200"
     if len(parts) == 2 and parts[0] in ["о", "отдать", "передать"]:
         amount_str = parts[1]
         if amount_str.isdigit():
@@ -395,17 +392,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await give_command(update, context)
             return
 
-    # Триггеры для банка
+    # Банк (+ / -)
     if len(parts) == 2 and parts[0] in ["б", "банк"]:
         val_str = parts[1]
-        
         if val_str.startswith("+") or val_str.isdigit():
             amount_str = val_str.replace("+", "")
             if amount_str.isdigit():
                 context.args = [amount_str]
                 await deposit_command(update, context)
                 return
-
         elif val_str.startswith("-"):
             amount_str = val_str.replace("-", "")
             if amount_str.isdigit():
@@ -413,7 +408,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await withdraw_command(update, context)
                 return
 
-    # --- 4. ТРИГГЕРЫ ДЛЯ СТАВОК В РУЛЕТКУ ---
+    # 4. Ставки в рулетку
     if len(parts) == 2 and parts[0].isdigit():
         bet = int(parts[0])
         raw_choice = parts[1]
@@ -431,12 +426,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await roulette_bet_command(update, context)
             return
 
-    # --- 5. ОБРАБОТКА КНОПОК МЕНЮ ---
-
+    # 5. Кнопки клавиатуры
     if raw_text in ["💰 Кошелек", "💰 Баланс"]:
         user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
         msg = (
-            f"💴 <b>Кошелек пользователя {user_mention}:</b>\n"
+            f"💳 <b>Кошелек пользователя {user_mention}:</b>\n"
             f"• На руках: {user_data['balance']} Valor\n"
             f"• В банке: {user_data['bank']} Valor"
         )
@@ -450,7 +444,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data["balance"] += 1000
             user_data["last_bonus"] = now
             update_user_data(user.id, user_data)
-            await update.message.reply_text("🎉 Вы получили ваш ежечасовой подарок: 1000 Valor!")
+            await update.message.reply_text("🎉 Вы получили ваш подарок: 1000 Valor!")
         else:
             remaining = int(cooldown - (now - user_data["last_bonus"]))
             mins, secs = divmod(remaining, 60)
@@ -463,15 +457,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>500 ч</code> — 500 на чёрное\n"
             "• <code>500 к</code> — 500 на красное\n\n"
             "<b>2. Запустите рулетку:</b>\n"
-            "• Напишите <code>го</code> (доступно через 7 секунд после 1-й ставки)",
+            "• Напишите <code>го</code>",
             parse_mode="HTML"
         )
-
     elif raw_text.startswith("🏦 Банк"):
         await update.message.reply_text(
             "🏦 <b>Управление банком и переводами:</b>\n\n"
             "<b>Банк:</b>\n"
-"• <code>б 1000</code> — положить в банк\n"
+            "• <code>б 1000</code> — положить в банк\n"
             "• <code>б -400</code> — снять из банка\n\n"
             "<b>Передать Valor игроку:</b>\n"
             "• Напиши <code>о 200</code> <b>в ответ на сообщение</b> игрока!",
@@ -489,9 +482,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 5. ЗАПУСК БОТА
 # =========================================================
 
-BOT_TOKEN = "8869539861:AAE8vdxDT3y6kZU-kSHTFRl7TL-nBMlsG5I"  # 👈 Вставь токен от BotFather!
+BOT_TOKEN = "8869539861:AAE8vdxDT3y6kZU-kSHTFRl7TL-nBMlsG5I"  # 👈 Вставь актуальный токен
 
 def main():
+    # Инициализируем базу данных SQLite при запуске
+    init_db()
+
     app = Application.builder().token(BOT_TOKEN).build()
 
     # Регистрация команд
@@ -503,10 +499,10 @@ def main():
     app.add_handler(CommandHandler("spin", spin_command))
     app.add_handler(CommandHandler("calc", calc_command))
 
-    # Регистрация обработчика текста
+    # Обработчик текста
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Бот успешно запущен!")
+    print("Бот успешно запущен и подключен к SQLite!")
     app.run_polling()
 
 if __name__ == "__main__":
