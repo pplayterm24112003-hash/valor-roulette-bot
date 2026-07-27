@@ -68,7 +68,6 @@ DONATE_PACKAGES = {
 # =========================================================
 DB_NAME = "database.db"
 
-
 def init_db():
   conn = sqlite3.connect(DB_NAME)
   cursor = conn.cursor()
@@ -155,7 +154,6 @@ def apply_bank_interest(user_id: int, user_data: dict) -> tuple[dict, int]:
 
   return user_data, earned
 
-
 # Глобальные переменные
 active_bets = []
 cooldown_start_time = 0
@@ -202,6 +200,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
       ["💰 Кошелек", "🎁 Подарок"],
       ["🎰 Рулетка", "💣 Мины"],
       ["🏦 Банк", "💎 Магазин"],
+      ["🎰 Слоты", "🏆 Топ"],
   ]
   reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
   welcome_msg = (
@@ -274,6 +273,41 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"\n\n📈 <i>Вам начислено +{earned} Valor (1% за 12 часов)!</i>"
   await update.message.reply_text(msg, parse_mode="HTML")
 
+async def leaderboard_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+  conn = sqlite3.connect("database.db")
+  cursor = conn.cursor()
+
+  cursor.execute(
+      "SELECT user_id, balance, bank, (balance + bank) AS total FROM users"
+      " ORDER BY total DESC LIMIT 10"
+  )
+
+  top_users = cursor.fetchall()
+  conn.close()
+
+  if not top_users:
+    await update.message.reply_text("📊 Лидерборд пока пуст!")
+    return
+
+  medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+  leaderboard_text = "🏆 <b>ТОП-10 Богатейших Игроков Valor:</b>\n\n"
+
+  for index, (u_id, balance, bank, total) in enumerate(top_users):
+    try:
+      member = await context.bot.get_chat(u_id)
+      name = member.first_name if member.first_name else f"Игрок {u_id}"
+    except Exception:
+      name = f"Игрок {u_id}"
+
+    medal = medals[index] if index < len(medals) else f"{index + 1}."
+    leaderboard_text += (
+        f"{medal} <b>{name}</b> — <b>{total:,} Valor</b>\n"
+        f"└ <i>(На руках: {balance:,} | В банке: {bank:,})</i>\n\n"
+    )
+
+  await update.message.reply_text(leaderboard_text, parse_mode="HTML")
 
 async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   sender = update.effective_user
@@ -431,9 +465,9 @@ def build_mines_keyboard(game: dict, reveal_all: bool = False):
         elif idx in opened:
           text = "💎"
         else:
-          text = "⬛"
+          text = " "
       else:
-        text = "💎" if idx in opened else "🟦"
+        text = "💎" if idx in opened else " "
 
       keyboard_row.append(
           InlineKeyboardButton(text, callback_data=f"mine_{idx}")
@@ -653,9 +687,8 @@ async def roulette_bet_command(
 
   if is_first_bet:
     await update.message.reply_text(
-        f"✅ <b>{user.first_name}</b> сделал(а) ставку <b>{bet} Valor</b> на"
-        f" <code>{choice}</code>!\n⏳ Кулдаун <b>7 сек</b>. Старт:"
-        " <code>го</code>.",
+        f"✅ <b>{user.first_name}</b> ставит <b>{bet} Valor</b> на"
+        f" <code>{choice}</code>!",
         parse_mode="HTML",
     )
   else:
@@ -688,19 +721,19 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
       5,
       7,
       9,
-      11,
-      13,
-      15,
-      17,
+      12,
+      14,
+      16,
+      18,
       19,
       21,
       23,
       25,
       27,
-      29,
-      31,
-      33,
-      35,
+      30,
+      32,
+      34,
+      36,
   ]
 
   if winning_number == 0:
@@ -708,46 +741,52 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif winning_number in red_numbers:
     winning_color = "красное 🔴"
   else:
-    winning_color = "черное ⬛"
+    winning_color = "черное ♠️"
 
   results_summary = []
 
   for b in active_bets:
-    u_id = b["user_id"]
-    u_data = get_user_data(u_id)
-    bet = b["bet"]
-    choice = b["choice"]
-    name = b["name"]
+      u_id = b["user_id"]
+      u_data = get_user_data(u_id)
+      bet = b["bet"]
+      choice = b["choice"]
+      name = b["name"]
 
-    won = False
-    win_amount = 0
+      won = False
+      win_amount = 0
 
-    if choice in ["красное", "черное"]:
-      if choice == winning_color.split()[0]:
-        won = True
-        win_amount = bet * 2
-    elif "-" in choice:
-      start_str, end_str = choice.split("-")
-      start, end = int(start_str), int(end_str)
-    if start <= winning_number <= end:
-        won = True
-        total_numbers_in_range = (end - start) + 1
-        multiplier = 36 / total_numbers_in_range
-        win_amount = int(bet * multiplier)
-    elif choice.isdigit():
-      if int(choice) == winning_number:
-        won = True
-        win_amount = bet * 36
+      # 1. Ставка на цвет (красное / черное)
+      if choice in ["красное", "черное"]:
+        if choice == winning_color.split()[0]:
+          won = True
+          win_amount = bet * 2
 
-    if won:
-      u_data["balance"] += win_amount
-      results_summary.append(
-          f"🟢 <b>{name}</b> ({choice}): +{win_amount} Valor 🎉"
-      )
-    else:
-      results_summary.append(f"🔴 <b>{name}</b> ({choice}): -{bet} Valor")
+      # 2. Ставка на диапазон (например, 10-20)
+      elif "-" in choice:
+        start_str, end_str = choice.split("-")
+        start, end = int(start_str), int(end_str)
+        if start <= winning_number <= end:
+          won = True
+          total_numbers_in_range = (end - start) + 1
+          multiplier = 36 / total_numbers_in_range
+          win_amount = int(bet * multiplier)
 
-    update_user_data(u_id, u_data)
+      # 3. Ставка на число (например, 15 или 0)
+      elif choice.isdigit():
+        if int(choice) == winning_number:
+          won = True
+          win_amount = bet * 36
+
+      # Зачисление выигрыша
+      if won:
+        u_data["balance"] += win_amount
+        results_summary.append(
+            f"🟢 <b>{name}</b> ({choice}): +{win_amount} Valor 🎉"
+        )
+      else:
+        results_summary.append(f"🔴 <b>{name}</b> ({choice}): -{bet} Valor")
+
+      update_user_data(u_id, u_data)
 
   active_bets.clear()
   cooldown_start_time = 0
@@ -757,6 +796,85 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
       f"🎰 Выпало: <b>{winning_number} ({winning_color.upper()})</b>\n\n<b>Результаты:</b>\n{res_text}",
       parse_mode="HTML",
   )
+  
+  # --- МИНИ-ИГРА "СЛОТЫ" ---
+  
+async def slots_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  user = update.effective_user
+  user_data = get_user_data(user.id)
+
+  if not context.args or not context.args[0].isdigit():
+    await update.message.reply_text(
+        "❌ Формат: <code>слоты 500</code> или <code>слот 500</code>",
+        parse_mode="HTML",
+    )
+    return
+
+  bet = int(context.args[0])
+
+  if bet <= 0 or user_data["balance"] < bet:
+    await update.message.reply_text("❌ Недостаточно средств!")
+    return
+
+  # Снимаем ставку
+  user_data["balance"] -= bet
+
+  # Символы и их веса (шансы выпадения)
+  symbols = ["💎", "7️⃣", "🔔", "🍇", "🍋"]
+  weights = [1, 4, 15, 30, 50]  # Алмаз выпадает реже всего
+
+  # Генерируем 3 случайных барабана
+  reel1 = random.choices(symbols, weights=weights, k=1)[0]
+  reel2 = random.choices(symbols, weights=weights, k=1)[0]
+  reel3 = random.choices(symbols, weights=weights, k=1)[0]
+
+  multiplier = 0
+  win_title = ""
+
+  # Вычисление выигрыша
+  if reel1 == reel2 == reel3:
+    if reel1 == "💎":
+      multiplier = 50
+      win_title = "💥 ГРАНДИОЗНЫЙ ДЖЕКПОТ! 3 АЛМАЗА! 💥"
+    elif reel1 == "7️⃣":
+      multiplier = 15
+      win_title = "🔥 ДЖЕКПОТ СЕМЕРКИ! 🔥"
+    elif reel1 == "🔔":
+      multiplier = 5
+      win_title = "🔔 Золотой звон!"
+    elif reel1 == "🍇":
+      multiplier = 3
+      win_title = "🍇 Сочный выигрыш!"
+    elif reel1 == "🍋":
+      multiplier = 2
+      win_title = "🍋 Лимонный удвоитель!"
+
+  elif (
+      reel1 == reel2
+      or reel2 == reel3
+      or reel1 == reel3
+  ):  # Пара совпадений (возврат ставки)
+    multiplier = 1
+    win_title = "✨ Совпала пара! Ставка возвращена."
+
+  win_amount = bet * multiplier
+
+  if multiplier > 0:
+    user_data["balance"] += win_amount
+    res_msg = (
+        f"🎰 | <b>[ {reel1} | {reel2} | {reel3} ]</b> | 🎰\n\n"
+        f"{win_title}\n"
+        f"🎉 Выигрыш: <b>+{win_amount} Valor</b> (x{multiplier})"
+    )
+  else:
+    res_msg = (
+        f"🎰 | <b>[ {reel1} | {reel2} | {reel3} ]</b> | 🎰\n\n"
+        f"🔴 Повезет в следующий раз!\n"
+        f"Потеряно: <b>-{bet} Valor</b>"
+    )
+
+  update_user_data(user.id, user_data)
+  await update.message.reply_text(res_msg, parse_mode="HTML")
 
 # =========================================================
 # 7. ОБРАБОТЧИК СООБЩЕНИЙ И ТРИГГЕРОВ
@@ -775,6 +893,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if text in ["го", "крутить", "погнали", "пуск"]:
     await spin_command(update, context)
     return
+  
+  elif raw_text in [
+        "🏆 Топ",
+        "🏆 Лидерборд",
+        "🏆 ТОП",
+        "топ",
+        "лидерборд",
+    ] or text in ["топ", "лидерборд"]:
+      await leaderboard_command(update, context)
+      return
 
   if text == "к":
     user_data, earned = apply_bank_interest(user.id, user_data)
@@ -789,8 +917,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
   parts = text.split()
+  
+  if "рулетка" in text or raw_text in ["🎰 Рулетка", "🎰 Играть"]:
+    instructions = (
+        "🎰 <b>Как играть в Рулетку Valor:</b>\n\n"
+        "1️⃣ <b>Сделайте ставку:</b>\n"
+        "• На цвет: <code>100 ч</code> (черное) или <code>100 к</code>"
+        " (красное)\n"
+        "• На число: <code>100 15</code> (выигрыш x36!)\n"
+        "• На диапазон: <code>100 1-12</code> или <code>100 10-20</code>\n\n"
+        "2️⃣ <b>Запустите вращение:</b>\n"
+        "• Подождите кулдаун (7 секунд) и напишите в чат <b>го</b>!"
+    )
+    
+    await update.message.reply_text(instructions, parse_mode="HTML")
+    return
+  elif raw_text in ["🎰 Слоты", "🎰 Слот"]:
+    await update.message.reply_text(
+        "🎰 <b>Слот-машина Valor:</b>\n\n"
+        "• Сыграть: <code>слоты 500</code>\n\n"
+        "<b>Коэффициенты:</b>\n"
+        "💎💎💎 — <b>x50</b> (ДЖЕКПОТ!)\n"
+        "7️⃣7️⃣7️⃣ — <b>x15</b>\n"
+        "🔔🔔🔔 — <b>x5</b>\n"
+        "🍇🍇🍇 — <b>x3</b>\n"
+        "🍋🍋🍋 — <b>x2</b>\n"
+        "Любая пара — <b>x1</b> (Возврат)",
+        parse_mode="HTML",
+    )
 
-  if len(parts) == 2 and parts[0] in ["мины", "мина", "mines"]:
+  if len(parts) == 2 and parts[0] in ["мины", "мина", "mines", "м"]:
     if parts[1].isdigit():
       context.args = [parts[1]]
       await start_mines_game(update, context)
@@ -800,6 +956,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if parts[1].isdigit():
       context.args = [parts[1]]
       await give_command(update, context)
+      return
+    
+    # Быстрые слоты (слоты 500 / слот 500)
+  if len(parts) == 2 and parts[0] in ["слоты", "слот", "slots", "slot", "с"]:
+    if parts[1].isdigit():
+      context.args = [parts[1]]
+      await slots_command(update, context)
       return
 
   if len(parts) == 2 and parts[0] in ["б", "банк"]:
@@ -835,7 +998,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
       msg += f"\n\n📈 <i>Вам начислено +{earned} Valor (1% за 12ч в банке)!</i>"
     await update.message.reply_text(msg, parse_mode="HTML")
 
-  elif raw_text in ["🎁 Подарок", "🎁 Бонус (1000 Valor)"]:
+  elif raw_text in ["🎁 Подарок", "🎁 Бонус (1000 Valor)", "бон"]:
     now = time.time()
     cooldown = 1 * 3600
     if now - user_data.get("last_bonus", 0) >= cooldown:
@@ -891,7 +1054,11 @@ def main():
   app.add_handler(CommandHandler("give", give_command))
   app.add_handler(CommandHandler("roulette", roulette_bet_command))
   app.add_handler(CommandHandler("spin", spin_command))
+  app.add_handler(CommandHandler("top", leaderboard_command))
+  app.add_handler(CommandHandler("leaderboard", leaderboard_command))
   app.add_handler(CommandHandler("mines", start_mines_game))
+  app.add_handler(CommandHandler("slots", slots_command))
+  app.add_handler(CommandHandler("slot", slots_command))
   app.add_handler(CommandHandler("shop", open_shop))
 
   # Обработчики доната (Telegram Stars)
@@ -909,7 +1076,7 @@ def main():
 
   print("Бот успешно запущен!")
   app.run_polling()
-
+("roulette.db")
 
 if __name__ == "__main__":
   main()
