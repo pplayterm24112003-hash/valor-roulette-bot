@@ -12,11 +12,6 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Константы и состояние рулетки
-ROULETTE_COOLDOWN = 7  # В секундах
-active_bets = []
-cooldown_start_time = 0
-
 # Настройка логов
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -293,6 +288,11 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Запуск рулетки по команде пользователя с проверкой КД."""
     global active_bets, cooldown_start_time
+    
+    # Константы и состояние рулетки
+    ROULETTE_COOLDOWN = 7  # В секундах
+    active_bets = []
+    cooldown_start_time = 0
 
     if not active_bets:
         await update.message.reply_text("❌ Ставок еще нет! Сделайте ставку (например: <code>100 ч</code>)", parse_mode="HTML")
@@ -489,7 +489,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 5. ЗАПУСК БОТА
 # =========================================================
 
-BOT_TOKEN = "8869539861:AAEhpB4TBy7g0VvplY2ST0e-XuBIb1mtWKc"  # 👈 Вставь токен от BotFather!
+BOT_TOKEN = "8869539861:AAE8vdxDT3y6kZU-kSHTFRl7TL-nBMlsG5I"  # 👈 Вставь токен от BotFather!
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
