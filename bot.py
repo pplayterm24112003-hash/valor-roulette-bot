@@ -28,7 +28,6 @@ def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                # json хранит ключи как строки, переводим обратно в int (user_id)
                 data = json.load(f)
                 return {int(k): v for k, v in data.items()}
         except Exception as e:
@@ -43,7 +42,6 @@ def save_db():
     except Exception as e:
         logging.error(f"Ошибка сохранения базы: {e}")
 
-# Инициализируем базу данных из файла при запуске
 user_db = load_db()
 active_bets = []          # Список текущих ставок
 cooldown_start_time = 0   # Время первой ставки
@@ -57,16 +55,17 @@ def get_user_data(user_id: int):
             "bank": 0,
             "last_bonus": 0
         }
-        save_db()  # Сохраняем нового пользователя
+        save_db()
     return user_db[user_id]
 
 def update_user_data(user_id: int, data: dict):
-    """Обновляет данные пользователя и сразу сохраняет в файл."""
+    """Обновляет данные пользователя и сохраняет в файл."""
     user_db[user_id] = data
-    save_db()  # Автоматически сохраняем изменения на диск
+    save_db()
+
 
 # =========================================================
-# 2. ОСНОВНЫЕ КОМАНДЫ ( /start, /deposit, /withdraw, /calc )
+# 2. ОСНОВНЫЕ КОМАНДЫ ( /start, /deposit, /withdraw, /give, /calc )
 # =========================================================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,7 +123,6 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("❌ Укажите сумму! Пример: <code>/withdraw 500</code> или <code>б -500</code>", parse_mode="HTML")
         return
-
     amount = int(context.args[0])
     if amount <= 0:
         await update.message.reply_text("❌ Сумма должна быть больше 0!")
@@ -145,6 +143,62 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• В банке: {user['bank']} Valor",
         parse_mode="HTML"
     )
+
+
+async def give_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Передача Valor другому игроку при ответе на его сообщение."""
+    sender = update.effective_user
+    reply_msg = update.message.reply_to_message
+
+    # 1. Проверяем, сделан ли ответ на сообщение
+    if not reply_msg:
+        await update.message.reply_text("❌ Чтобы передать Valor, ответьте на сообщение игрока комендой <code>о <сумма></code>!", parse_mode="HTML")
+        return
+
+    target_user = reply_msg.from_user
+
+    # 2. Нельзя передавать самому себе или ботам
+    if target_user.id == sender.id:
+        await update.message.reply_text("❌ Вы не можете передать Valor самому себе!")
+        return
+    if target_user.is_bot:
+        await update.message.reply_text("❌ Нельзя передавать Valor ботам!")
+        return
+
+    # 3. Проверяем сумму
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Укажите сумму для передачи! Пример: <code>о 200</code>", parse_mode="HTML")
+        return
+
+    amount = int(context.args[0])
+    if amount <= 0:
+        await update.message.reply_text("❌ Сумма должна быть больше 0!")
+        return
+
+    sender_data = get_user_data(sender.id)
+    target_data = get_user_data(target_user.id)
+
+    if sender_data["balance"] < amount:
+        await update.message.reply_text(f"❌ Недостаточно средств на руках! Ваш баланс: {sender_data['balance']} Valor")
+        return
+
+    # 4. Производим транзакцию
+    sender_data["balance"] -= amount
+    target_data["balance"] += amount
+
+    update_user_data(sender.id, sender_data)
+    update_user_data(target_user.id, target_data)
+
+    # Красиво тегаем обоих игроков
+    sender_mention = f'<a href="tg://user?id={sender.id}">{sender.first_name}</a>'
+    target_mention = f'<a href="tg://user?id={target_user.id}">{target_user.first_name}</a>'
+
+    await update.message.reply_text(
+        f"🤝 {sender_mention} передал(а) <b>{amount} Valor</b> игроку {target_mention}!",
+        parse_mode="HTML"
+    )
+
+
 async def calc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Калькулятор."""
     if not context.args:
@@ -179,7 +233,6 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     bet = int(context.args[0])
     choice = context.args[1].lower()
-
     if bet <= 0:
         await update.message.reply_text("❌ Ставка должна быть больше 0!")
         return
@@ -188,17 +241,14 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(f"❌ Недостаточно средств! На руках: {user_data['balance']} Valor")
         return
 
-    # Замораживаем ставку с баланса
     user_data["balance"] -= bet
     update_user_data(user.id, user_data)
 
     is_first_bet = len(active_bets) == 0
 
-    # Если это самая первая ставка в раунде — заново засекаем 7 секунд
     if is_first_bet:
         cooldown_start_time = time.time()
 
-    # Сохраняем ставку в общий стол
     active_bets.append({
         "user_id": user.id,
         "name": user.first_name,
@@ -208,8 +258,8 @@ async def roulette_bet_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if is_first_bet:
         await update.message.reply_text(
-            f"✅ <b>{user.first_name}</b> ставит <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
-            f"\n📊 Всего ставок: <b>{len(active_bets)}</b>.",
+            f"✅ <b>{user.first_name}</b> ставит ставку <b>{bet} Valor</b> на <b>{choice.upper()}</b>!\n"
+            f"📊 Всего ставок: <b>{len(active_bets)}</b>.",
             parse_mode="HTML"
         )
     else:
@@ -228,7 +278,6 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ставок еще нет! Сделайте ставку (например: <code>100 ч</code>)", parse_mode="HTML")
         return
 
-    # Проверяем, прошло ли 7 секунд с момента первой ставки
     elapsed = time.time() - cooldown_start_time
     if elapsed < ROULETTE_COOLDOWN:
         remaining = int(ROULETTE_COOLDOWN - elapsed) + 1
@@ -238,7 +287,6 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Выпадение случайного числа
     winning_number = random.randint(0, 36)
     red_numbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
     
@@ -250,7 +298,7 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         winning_color = "черное ⬛"
 
     results_summary = []
-# Расчет результатов для каждого игрока
+
     for b in active_bets:
         u_id = b["user_id"]
         u_data = get_user_data(u_id)
@@ -271,19 +319,18 @@ async def spin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if won:
             win_amount = bet * multiplier
             u_data["balance"] += win_amount
-            results_summary.append(f"🟢 <b>{name}</b>: +{win_amount - bet} Valor")
+            results_summary.append(f"🟢 <b>{name}</b>: +{win_amount - bet} Valor (Выигрыш!)")
         else:
-            results_summary.append(f"🔴 <b>{name}</b>: -{bet} Valor")
+            results_summary.append(f"🔴 <b>{name}</b>: -{bet} Valor (Проигрыш)")
 
         update_user_data(u_id, u_data)
 
-    # Очищаем пул ставок после вращения
     active_bets.clear()
     cooldown_start_time = 0
 
     res_text = "\n".join(results_summary)
     await update.message.reply_text(
-        f"🎯 Выпало: <b>{winning_number} {winning_color.upper()}</b>\n\n"
+        f"🎯 Выпало: <b>{winning_number} ({winning_color.upper()})</b>\n\n"
         f"<b>Результаты раунда:</b>\n{res_text}",
         parse_mode="HTML"
     )
@@ -297,25 +344,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    user_id = update.effective_user.id
-    user = get_user_data(user_id)
+    user = update.effective_user
+    user_data = get_user_data(user.id)
     raw_text = update.message.text.strip()
     text = raw_text.lower()
 
-    # --- 1. ТРИГГЕР ДЛЯ ЗАПУСКА РУЛЕТКИ (го, крутить, spin, погнали) ---
+    # --- 1. ТРИГГЕР ДЛЯ ЗАПУСКА РУЛЕТКИ ---
     if text in ["го", "крутить", "погнали", "пуск"]:
         await spin_command(update, context)
         return
-
-    # --- 2. ТРИГГЕР ДЛЯ КОШЕЛЬКА (буква "к") ---
+# --- 2. ТРИГГЕР ДЛЯ КОШЕЛЬКА (буква "к") С ТЕГОМ ПОЛЬЗОВАТЕЛЯ ---
     if text == "к":
-        msg = f"💳 <b>Ваш кошелек:</b>\n• На руках: {user['balance']} Valor\n• В банке: {user['bank']} Valor"
+        user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
+        msg = (
+            f"💴 <b>Кошелек пользователя {user_mention}:</b>\n"
+            f"• На руках: {user_data['balance']} Valor\n"
+            f"• В банке: {user_data['bank']} Valor"
+        )
         await update.message.reply_text(msg, parse_mode="HTML")
         return
 
-    # --- 3. ТРИГГЕРЫ ДЛЯ БАНКА (б 1000, б +150, б -400) ---
+    # --- 3. ТРИГГЕРЫ ДЛЯ БАНКА И ОБМЕНА ВАЛОРАМИ ---
     parts = text.split()
 
+    # Быстрый триггер обмена: "о 200" (отдать 200 валоров в ответ на сообщение)
+    if len(parts) == 2 and parts[0] in ["о", "отдать", "передать"]:
+        amount_str = parts[1]
+        if amount_str.isdigit():
+            context.args = [amount_str]
+            await give_command(update, context)
+            return
+
+    # Триггеры для банка
     if len(parts) == 2 and parts[0] in ["б", "банк"]:
         val_str = parts[1]
         
@@ -333,7 +393,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await withdraw_command(update, context)
                 return
 
-    # --- 4. ТРИГГЕРЫ ДЛЯ СТАВОК В РУЛЕТКУ (500 ч, 100 к, 1000 7) ---
+    # --- 4. ТРИГГЕРЫ ДЛЯ СТАВОК В РУЛЕТКУ ---
     if len(parts) == 2 and parts[0].isdigit():
         bet = int(parts[0])
         raw_choice = parts[1]
@@ -354,19 +414,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- 5. ОБРАБОТКА КНОПОК МЕНЮ ---
 
     if raw_text in ["💰 Кошелек", "💰 Баланс"]:
-        msg = f"💴 <b>Ваш кошелек:</b>\n• На руках: {user['balance']} Valor\n• В банке: {user['bank']} Valor"
+        user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
+        msg = (
+            f"💴 <b>Кошелек пользователя {user_mention}:</b>\n"
+            f"• На руках: {user_data['balance']} Valor\n"
+            f"• В банке: {user_data['bank']} Valor"
+        )
         await update.message.reply_text(msg, parse_mode="HTML")
 
     elif raw_text in ["🎁 Подарок", "🎁 Бонус (1000 Valor)"]:
         now = time.time()
         cooldown = 1 * 3600  # 1 час
-        if now - user.get("last_bonus", 0) >= cooldown:
-            user["balance"] += 1000
-            user["last_bonus"] = now
-            update_user_data(user_id, user)
-            await update.message.reply_text("🎉 Вы получили ваш Подарок: 1000 Valor!")
+        
+        if now - user_data.get("last_bonus", 0) >= cooldown:
+            user_data["balance"] += 1000
+            user_data["last_bonus"] = now
+            update_user_data(user.id, user_data)
+            await update.message.reply_text("🎉 Вы получили ваш ежечасовой подарок: 1000 Valor!")
         else:
-            remaining = int(cooldown - (now - user["last_bonus"]))
+            remaining = int(cooldown - (now - user_data["last_bonus"]))
             mins, secs = divmod(remaining, 60)
             await update.message.reply_text(f"⏳ Подарок пока недоступен!\nПодождите еще {mins} мин. {secs} сек.")
 
@@ -383,9 +449,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif raw_text.startswith("🏦 Банк"):
         await update.message.reply_text(
-            "🏦 <b>Управление банком:</b>\n\n"
-            "• <code>б 1000</code> — положить в банк\n"
-            "• <code>б -1000</code> — снять из банка",
+            "🏦 <b>Управление банком и переводами:</b>\n\n"
+            "<b>Банк:</b>\n"
+"• <code>б 1000</code> — положить в банк\n"
+            "• <code>б -400</code> — снять из банка\n\n"
+            "<b>Передать Valor игроку:</b>\n"
+            "• Напиши <code>о 200</code> <b>в ответ на сообщение</b> игрока!",
             parse_mode="HTML"
         )
 
@@ -409,6 +478,7 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("deposit", deposit_command))
     app.add_handler(CommandHandler("withdraw", withdraw_command))
+    app.add_handler(CommandHandler("give", give_command))
     app.add_handler(CommandHandler("roulette", roulette_bet_command))
     app.add_handler(CommandHandler("spin", spin_command))
     app.add_handler(CommandHandler("calc", calc_command))
