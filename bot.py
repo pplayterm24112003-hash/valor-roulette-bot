@@ -1,6 +1,6 @@
 import time
-import json
-import os
+import sqlite3
+import logging
 import random
 import logging
 from telegram import Update, ReplyKeyboardMarkup
@@ -12,6 +12,11 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# Константы и состояние рулетки
+ROULETTE_COOLDOWN = 7  # В секундах
+active_bets = []
+cooldown_start_time = 0
+
 # Настройка логов
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,48 +26,63 @@ logging.basicConfig(
 # =========================================================
 # 1. БАЗА ДАННЫХ (С сохранением в файл users.json)
 # =========================================================
-DB_FILE = "users.json"
 
-def load_db():
-    """Загружает базу данных из файла."""
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return {int(k): v for k, v in data.items()}
-        except Exception as e:
-            logging.error(f"Ошибка загрузки базы: {e}")
-    return {}
+DB_NAME = "database.db"  # Если на Render с Persistent Disk, укажите путь: "/var/data/database.db"
 
-def save_db():
-    """Сохраняет текущую базу данных в файл."""
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(user_db, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        logging.error(f"Ошибка сохранения базы: {e}")
+def init_db():
+    """Создает таблицу пользователей, если ее еще нет."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER DEFAULT 1000,
+            bank INTEGER DEFAULT 0,
+            last_bonus REAL DEFAULT 0
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-user_db = load_db()
-active_bets = []          # Список текущих ставок
-cooldown_start_time = 0   # Время первой ставки
-ROULETTE_COOLDOWN = 7     # Кулдаун в секундах
-
-def get_user_data(user_id: int):
-    """Возвращает данные пользователя или создает новые."""
-    if user_id not in user_db:
-        user_db[user_id] = {
-            "balance": 1000,
-            "bank": 0,
-            "last_bonus": 0
-        }
-        save_db()
-    return user_db[user_id]
+def get_user_data(user_id: int) -> dict:
+    """Получает данные пользователя или регистрирует нового с балансом 1000."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT balance, bank, last_bonus FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    
+    if row is None:
+        # Новый игрок — выдаем стартовый баланс
+        cursor.execute(
+            "INSERT INTO users (user_id, balance, bank, last_bonus) VALUES (?, ?, ?, ?)",
+            (user_id, 1000, 0, 0)
+        )
+        conn.commit()
+        balance, bank, last_bonus = 1000, 0, 0
+    else:
+        balance, bank, last_bonus = row
+        
+    conn.close()
+    return {
+        "balance": balance,
+        "bank": bank,
+        "last_bonus": last_bonus
+    }
 
 def update_user_data(user_id: int, data: dict):
-    """Обновляет данные пользователя и сохраняет в файл."""
-    user_db[user_id] = data
-    save_db()
-
+    """Обновляет баланс и данные пользователя в базе данных."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE users 
+        SET balance = ?, bank = ?, last_bonus = ?
+        WHERE user_id = ?
+    """, (data["balance"], data["bank"], data["last_bonus"], user_id))
+    
+    conn.commit()
+    conn.close()
 
 # =========================================================
 # 2. ОСНОВНЫЕ КОМАНДЫ ( /start, /deposit, /withdraw, /give, /calc )
