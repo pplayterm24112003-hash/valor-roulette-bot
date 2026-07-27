@@ -4,7 +4,6 @@ import random
 import sqlite3
 import time
 from tracemalloc import start
-from turtle import update
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
